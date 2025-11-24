@@ -1,0 +1,173 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  padding: 1rem;
+  background: #020617;
+  color: #e5e7eb;
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+#status {
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+
+#topBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+button {
+  padding: 0.4rem 0.9rem;
+  border-radius: 6px;
+  border: none;
+  background: #f97316;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #334155;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#modeLabel {
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+#layout {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+#left {
+  flex: 2;
+  min-width: 0;
+}
+
+#right {
+  flex: 1;
+  min-width: 260px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#gameContainer {
+  background: #020617;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  padding: 0.5rem;
+}
+
+#game {
+  display: block;
+  background: radial-gradient(circle at 10% 0, #1f2937 0, #020617 65%);
+  border-radius: 8px;
+  border: 1px solid #111827;
+  max-width: 100%;
+}
+
+#help {
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+  color: #9ca3af;
+}
+
+/* Timeline */
+#timelineContainer {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+#timeline {
+  width: 100%;
+}
+
+/* Event Log */
+#log {
+  flex: 1;
+  background: #020617;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  overflow-y: auto;
+  max-height: 520px;
+}
+
+.log-entry {
+  border-bottom: 1px solid #1f2937;
+  padding: 0.25rem 0;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-meta {
+  color: #9ca3af;
+  font-size: 0.7rem;
+}
+
+.log-body {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+}
+
+/* Mobile D-pad */
+#touchControls {
+  margin-top: 0.75rem;
+}
+
+.touch-dpad {
+  display: flex;
+  justify-content: center;
+}
+
+.touch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  grid-template-rows: repeat(3, 48px);
+  gap: 4px;
+}
+
+.touch-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.touch-arrow {
+  padding: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  border: none;
+  background: #475569;
+  color: #e5e7eb;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+/* Hide D-pad on desktop */
+@media (min-width: 900px) {
+  .touch-dpad {
+    display: none;
+  }
+}

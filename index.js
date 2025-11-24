@@ -64,7 +64,7 @@ const kafka = new Kafka({
 const consumer = kafka.consumer({ groupId: "kafka-game-live" });
 const producer = kafka.producer();
 
-// live stream: consume from Kafka and push to WS clients
+// live consumer: push Kafka events to all WS clients
 async function startKafka() {
   await producer.connect();
   await consumer.connect();
@@ -126,10 +126,7 @@ app.post("/produce", async (req, res) => {
   }
 });
 
-// --------- REPLAY (for snapshot + slider) ----------
-// Client sends a sessionId; we tag all replayed events with it.
-// Each browser only processes replay events with its own sessionId.
-// Kafka remains the *only* persistent state; this just re-reads the log.
+// --------- REPLAY (per-session snapshot + slider) ----------
 app.post("/replay", async (req, res) => {
   const { sessionId } = req.body || {};
   if (!sessionId) {
@@ -146,7 +143,6 @@ app.post("/replay", async (req, res) => {
     await replayConsumer.connect();
     await replayConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: true });
 
-    // Fire-and-forget replay; response returns immediately
     (async () => {
       console.log("Starting replay for session", sessionId);
       broadcast({ control: "REPLAY_START", sessionId });
@@ -180,7 +176,7 @@ app.post("/replay", async (req, res) => {
       console.error("Replay error:", err);
     });
 
-    // Stop replay after 15s (demo) so consumer doesn’t live forever
+    // stop this replay consumer after 15 seconds (demo)
     setTimeout(() => {
       replayConsumer
         .disconnect()
