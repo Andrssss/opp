@@ -7,39 +7,13 @@ const { Kafka } = require("kafkajs");
 
 // --------- ENV VARS ----------
 const PORT = process.env.PORT || 8080;
-const KAFKA_BROKER = process.env.KAFKA_BROKER; // e.g. "pkc-xxxxxx.eu-central-1.aws.confluent.cloud:9092"
+const KAFKA_BROKER = process.env.KAFKA_BROKER;
 const KAFKA_TOPIC = process.env.KAFKA_TOPIC || "demo-stream";
 
 if (!KAFKA_BROKER) {
   console.error("Missing KAFKA_BROKER env var");
   process.exit(1);
 }
-
-// --------- EXPRESS + HTTP SERVER ----------
-const app = express();
-app.use(express.json()); // for JSON POST body
-app.use(express.static(path.join(__dirname, "public")));
-
-const server = http.createServer(app);
-
-// --------- WEBSOCKET SERVER ----------
-const wss = new WebSocketServer({ server, path: "/ws" });
-
-function broadcast(json) {
-  const data = JSON.stringify(json);
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1) {
-      client.send(data);
-    }
-  });
-}
-
-wss.on("connection", (socket) => {
-  console.log("Client connected");
-  socket.on("close", () => console.log("Client disconnected"));
-});
-
-// --------- KAFKA SETUP (Confluent Cloud) ----------
 
 const saslUsername = process.env.KAFKA_SASL_USERNAME;
 const saslPassword = process.env.KAFKA_SASL_PASSWORD;
@@ -51,8 +25,33 @@ if (!saslUsername || !saslPassword) {
 
 console.log("Using broker:", KAFKA_BROKER, "topic:", KAFKA_TOPIC);
 
+// --------- EXPRESS + HTTP SERVER ----------
+const app = express();
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+const server = http.createServer(app);
+
+// --------- WEBSOCKET SERVER ----------
+const wss = new WebSocketServer({ server, path: "/ws" });
+
+function broadcast(json) {
+  const data = JSON.stringify(json);
+  wss.clients.forEach((client) => {
+    if (client.readyState === client.OPEN) {
+      client.send(data);
+    }
+  });
+}
+
+wss.on("connection", (socket) => {
+  console.log("Client connected");
+  socket.on("close", () => console.log("Client disconnected"));
+});
+
+// --------- KAFKA SETUP ----------
 const kafka = new Kafka({
-  clientId: "stream-demo",
+  clientId: "kafka-game-demo",
   brokers: [KAFKA_BROKER],
   ssl: true,
   sasl: {
@@ -62,10 +61,10 @@ const kafka = new Kafka({
   },
 });
 
-const consumer = kafka.consumer({ groupId: "stream-demo-group" });
+const consumer = kafka.consumer({ groupId: "kafka-game-live" });
 const producer = kafka.producer();
 
-// consume from Kafka and push to WS clients
+// Consume from Kafka and push to WS clients (LIVE stream)
 async function startKafka() {
   await producer.connect();
   await consumer.connect();
@@ -92,9 +91,10 @@ async function startKafka() {
           timestamp: message.timestamp,
           key: message.key ? message.key.toString() : null,
           value: payload,
+          stream: "live", // mark as live stream
         };
 
-        // send to all connected browsers
+        // Server keeps NO game state, just forwards the event
         broadcast(event);
       } catch (err) {
         console.error("Error processing message:", err);
@@ -103,30 +103,92 @@ async function startKafka() {
   });
 }
 
-// --------- HTTP ENDPOINT TO PRODUCE MESSAGES ----------
+// --------- HTTP ENDPOINT TO PRODUCE GAME EVENTS ----------
+// Body is the *full* event, e.g. { type: "PLAYER_MOVED", playerId, x, y }
 app.post("/produce", async (req, res) => {
   try {
-    const { text, user } = req.body || {};
-    if (!text || text.trim() === "") {
-      return res.status(400).json({ error: "text is required" });
+    const event = req.body || {};
+    if (!event.type) {
+      return res.status(400).json({ error: "event.type is required" });
     }
 
-    const payload = {
-      type: "CHAT_MESSAGE",
-      text: text.trim(),
-      user: user || "student",
-      createdAt: new Date().toISOString(),
-    };
+    // add timestamp if caller didn't
+    if (!event.createdAt) {
+      event.createdAt = new Date().toISOString();
+    }
 
     await producer.send({
       topic: KAFKA_TOPIC,
-      messages: [{ value: JSON.stringify(payload) }],
+      messages: [{ value: JSON.stringify(event) }],
     });
 
     return res.json({ status: "ok" });
   } catch (err) {
     console.error("Error producing message:", err);
     return res.status(500).json({ error: "failed to produce message" });
+  }
+});
+
+// --------- REPLAY ENDPOINT ----------
+// Starts a separate consumer from the beginning of the topic
+// and replays all events, tagged as stream:"replay".
+app.post("/replay", async (req, res) => {
+  try {
+    const replayConsumer = kafka.consumer({
+      groupId: `kafka-game-replay-${Date.now()}`,
+    });
+
+    await replayConsumer.connect();
+    await replayConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: true });
+
+    // Fire-and-forget async replay
+    (async () => {
+      console.log("Starting replay from beginning of topic");
+      broadcast({ control: "REPLAY_START" });
+
+      await replayConsumer.run({
+        eachMessage: async ({ topic, partition, message }) => {
+          const valueStr = message.value?.toString() || "{}";
+          let payload;
+
+          try {
+            payload = JSON.parse(valueStr);
+          } catch {
+            payload = { raw: valueStr };
+          }
+
+          const event = {
+            topic,
+            partition,
+            offset: message.offset,
+            timestamp: message.timestamp,
+            key: message.key ? message.key.toString() : null,
+            value: payload,
+            stream: "replay",
+          };
+
+          broadcast(event);
+        },
+      });
+    })().catch((err) => {
+      console.error("Replay error:", err);
+    });
+
+    // (optional) stop replay consumer after some time so it doesn't live forever
+    setTimeout(() => {
+      replayConsumer
+        .disconnect()
+        .then(() => {
+          console.log("Replay finished / stopped");
+          broadcast({ control: "REPLAY_END" });
+        })
+        .catch((err) => console.error("Error stopping replay", err));
+    }, 15000); // 15s replay window, adjust as you like
+
+    res.json({ status: "replay-started" });
+  } catch (err) {
+    console.error("Error starting replay:", err);
+    res.status(500).json({ error: "failed to start replay" });
   }
 });
 

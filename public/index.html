@@ -2,13 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Kafka streaming demo</title>
+    <title>Kafka Multiplayer Game Demo</title>
     <style>
       body {
         font-family: system-ui, sans-serif;
         margin: 0;
         padding: 1rem;
-        background: #0f172a;
+        background: #020617;
         color: #e5e7eb;
       }
       h1 {
@@ -18,95 +18,101 @@
         font-size: 0.9rem;
         margin-bottom: 1rem;
       }
-      #form {
+      #controls {
         display: flex;
+        flex-wrap: wrap;
         gap: 0.5rem;
         margin-bottom: 1rem;
-      }
-      #text {
-        flex: 1;
-        padding: 0.5rem 0.75rem;
-        border-radius: 6px;
-        border: 1px solid #553333;
-        background: #020617;
-        color: #e5e7eb;
+        align-items: center;
       }
       button {
         padding: 0.5rem 1rem;
         border-radius: 6px;
         border: none;
-        background: #f63b3b;
+        background: #f97316;
         color: white;
         font-weight: 600;
         cursor: pointer;
+      }
+      button.secondary {
+        background: #334155;
       }
       button:disabled {
         opacity: 0.5;
         cursor: default;
       }
-      #events {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-          "Liberation Mono", "Courier New", monospace;
-        white-space: pre-wrap;
+      #gameContainer {
         background: #020617;
-        padding: 1rem;
         border-radius: 8px;
-        max-height: 70vh;
-        overflow-y: auto;
         border: 1px solid #1e293b;
+        padding: 0.5rem;
       }
-      .event {
-        border-bottom: 1px solid #1e293b;
-        padding-bottom: 0.75rem;
-        margin-bottom: 0.75rem;
+      #game {
+        display: block;
+        background: radial-gradient(circle at top, #1f2937 0, #020617 60%);
+        border-radius: 8px;
+        border: 1px solid #111827;
       }
-      .event:last-child {
-        border-bottom: none;
-        margin-bottom: 0;
-        padding-bottom: 0;
-      }
-      .event-header {
+      #help {
         font-size: 0.8rem;
+        margin-top: 0.5rem;
         color: #9ca3af;
-        margin-bottom: 0.25rem;
-      }
-      .chat-text {
-        font-size: 0.95rem;
-        margin-bottom: 0.25rem;
-      }
-      .pill {
-        display: inline-block;
-        padding: 0.1rem 0.4rem;
-        border-radius: 999px;
-        font-size: 0.75rem;
-        background: #111827;
-        border: 1px solid #374151;
-        margin-left: 0.25rem;
       }
     </style>
   </head>
   <body>
-    <h1>DB → Kafka → WebSocket (student demo)</h1>
+    <h1>Kafka Multiplayer Arena</h1>
     <div id="status">Connecting…</div>
 
-    <form id="form">
-      <input
-        id="text"
-        type="text"
-        placeholder="Type a message and send it through Kafka…"
-        autocomplete="off"
-      />
-      <button id="sendBtn" type="submit">Send</button>
-    </form>
+    <div id="controls">
+      <button id="joinBtn">Join game</button>
+      <button id="replayBtn" class="secondary" disabled>Replay from Kafka</button>
+      <button id="liveBtn" class="secondary" disabled>Back to live</button>
+      <span id="modeLabel"></span>
+    </div>
 
-    <div id="events"></div>
+    <div id="gameContainer">
+      <canvas id="game" width="800" height="500"></canvas>
+      <div id="help">
+        Use <strong>arrow keys / WASD</strong> to move. Every movement and join
+        event is sent through <strong>Kafka</strong>. Replay will wipe the arena
+        and rebuild it only from historical Kafka events.
+      </div>
+    </div>
 
     <script>
       const statusEl = document.getElementById("status");
-      const eventsEl = document.getElementById("events");
-      const formEl = document.getElementById("form");
-      const textEl = document.getElementById("text");
-      const sendBtn = document.getElementById("sendBtn");
+      const joinBtn = document.getElementById("joinBtn");
+      const replayBtn = document.getElementById("replayBtn");
+      const liveBtn = document.getElementById("liveBtn");
+      const modeLabel = document.getElementById("modeLabel");
+
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+
+      // ----- basic client-side state (derived only from event stream) -----
+      const players = new Map(); // playerId -> { x, y, color }
+      let myId = null;
+      let myColor = null;
+      let mode = "live"; // "live" or "replay"
+
+      function setMode(newMode) {
+        mode = newMode;
+        players.clear();
+        draw();
+
+        if (mode === "live") {
+          modeLabel.textContent = "Mode: LIVE (stream: live)";
+          replayBtn.disabled = false;
+          liveBtn.disabled = true;
+        } else {
+          modeLabel.textContent = "Mode: REPLAY (stream: replay)";
+          replayBtn.disabled = true;
+          liveBtn.disabled = false;
+        }
+      }
+
+      setMode("live");
 
       // ----- WebSocket for streaming from Kafka -----
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -132,80 +138,192 @@
         try {
           data = JSON.parse(msg.data);
         } catch {
-          data = { value: { raw: msg.data } };
+          console.warn("Non-JSON message:", msg.data);
+          return;
         }
 
-        // backend sends { topic, offset, value: payload }
-        const v = data.value || {};
-        const isChat = v.type === "CHAT_MESSAGE";
+        const stream = data.stream || "live"; // "live" or "replay"
+        const ev = data.value || {};
 
-        const container = document.createElement("div");
-        container.className = "event";
+        // ignore the "other" stream when in replay/live mode
+        if (mode === "live" && stream !== "live") return;
+        if (mode === "replay" && stream !== "replay") return;
 
-        const header = document.createElement("div");
-        header.className = "event-header";
-        header.textContent =
-          "topic: " +
-          (data.topic || "(unknown)") +
-          " • offset " +
-          (data.offset || "?");
-
-        if (isChat) {
-          const line = document.createElement("div");
-          line.className = "chat-text";
-          line.textContent = v.user + ": " + v.text;
-
-          const meta = document.createElement("span");
-          meta.className = "pill";
-          meta.textContent = "type=CHAT_MESSAGE";
-
-          line.appendChild(meta);
-          container.appendChild(header);
-          container.appendChild(line);
-
-          const raw = document.createElement("pre");
-          raw.textContent = JSON.stringify(v, null, 2);
-          raw.style.fontSize = "0.75rem";
-          raw.style.color = "#9ca3af";
-          container.appendChild(raw);
-        } else {
-          // generic event (e.g. Debezium before/after)
-          const body = document.createElement("pre");
-          body.textContent = JSON.stringify(v, null, 2);
-          container.appendChild(header);
-          container.appendChild(body);
-        }
-
-        // prepend newest
-        eventsEl.insertBefore(container, eventsEl.firstChild);
+        applyGameEvent(ev);
       };
 
-      // ----- Form: send message into Kafka via backend -----
-      formEl.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const text = textEl.value.trim();
-        if (!text) return;
+      // ----- Drawing -----
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        sendBtn.disabled = true;
+        // draw arena border
+        ctx.strokeStyle = "#1f2937";
+        ctx.lineWidth = 3;
+        ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
 
+        // draw players
+        for (const [id, p] of players.entries()) {
+          const isMe = id === myId;
+          const size = isMe ? 18 : 14;
+
+          ctx.fillStyle = p.color || "#38bdf8";
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+          ctx.fill();
+
+          if (isMe) {
+            ctx.strokeStyle = "#facc15";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = "#e5e7eb";
+          ctx.font = "11px system-ui";
+          ctx.textAlign = "center";
+          ctx.fillText(id.slice(0, 4), p.x, p.y - size - 4);
+        }
+      }
+
+      function clamp(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+      }
+
+      // ----- Event application (pure event sourcing on client) -----
+      function applyGameEvent(ev) {
+        if (!ev.type) return;
+
+        if (ev.type === "PLAYER_JOINED") {
+          players.set(ev.playerId, {
+            x: ev.x,
+            y: ev.y,
+            color: ev.color || "#38bdf8",
+          });
+          draw();
+        }
+
+        if (ev.type === "PLAYER_MOVED") {
+          const existing = players.get(ev.playerId) || {
+            x: ev.x,
+            y: ev.y,
+            color: ev.color || "#38bdf8",
+          };
+          existing.x = ev.x;
+          existing.y = ev.y;
+          if (ev.color) existing.color = ev.color;
+          players.set(ev.playerId, existing);
+          draw();
+        }
+      }
+
+      // ----- Helper: send event into Kafka via backend -----
+      async function sendKafkaEvent(ev) {
         try {
           const res = await fetch("/produce", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text }),
+            body: JSON.stringify(ev),
           });
-
           if (!res.ok) {
             console.error("Produce failed", await res.text());
-          } else {
-            textEl.value = "";
           }
         } catch (err) {
           console.error("Error calling /produce", err);
-        } finally {
-          sendBtn.disabled = false;
+        }
+      }
+
+      // ----- Join game -----
+      joinBtn.addEventListener("click", async () => {
+        if (myId) return; // already joined
+
+        // unique-ish id and color only for visualisation
+        myId = Math.random().toString(36).slice(2, 8);
+        myColor =
+          "#" +
+          Math.floor(Math.random() * 0xffffff)
+            .toString(16)
+            .padStart(6, "0");
+
+        // random spawn location inside arena
+        const x = 40 + Math.random() * (canvas.width - 80);
+        const y = 40 + Math.random() * (canvas.height - 80);
+
+        await sendKafkaEvent({
+          type: "PLAYER_JOINED",
+          playerId: myId,
+          x,
+          y,
+          color: myColor,
+        });
+
+        joinBtn.disabled = true;
+        replayBtn.disabled = false;
+        statusEl.textContent =
+          "Joined as " + myId + ". Use arrows / WASD to move.";
+      });
+
+      // ----- Keyboard movement -----
+      const SPEED = 10;
+
+      window.addEventListener("keydown", (e) => {
+        if (!myId) return;
+        if (mode !== "live") return; // during replay we don't move
+
+        let dx = 0;
+        let dy = 0;
+
+        if (e.key === "ArrowUp" || e.key === "w") dy = -SPEED;
+        if (e.key === "ArrowDown" || e.key === "s") dy = SPEED;
+        if (e.key === "ArrowLeft" || e.key === "a") dx = -SPEED;
+        if (e.key === "ArrowRight" || e.key === "d") dx = SPEED;
+
+        if (!dx && !dy) return;
+
+        // we don't trust local state as canonical, but we use it to create
+        // the next position which is then sent as an event to Kafka
+        const current = players.get(myId) || {
+          x: canvas.width / 2,
+          y: canvas.height / 2,
+          color: myColor,
+        };
+
+        const newX = clamp(current.x + dx, 30, canvas.width - 30);
+        const newY = clamp(current.y + dy, 30, canvas.height - 30);
+
+        sendKafkaEvent({
+          type: "PLAYER_MOVED",
+          playerId: myId,
+          x: newX,
+          y: newY,
+          color: myColor,
+        });
+      });
+
+      // ----- Replay button -----
+      replayBtn.addEventListener("click", async () => {
+        if (!myId) {
+          alert("Join the game first so you can compare live vs replay.");
+        }
+
+        setMode("replay");
+        statusEl.textContent = "Replaying history from Kafka…";
+
+        try {
+          const res = await fetch("/replay", { method: "POST" });
+          if (!res.ok) {
+            console.error("Replay start failed", await res.text());
+          }
+        } catch (err) {
+          console.error("Error starting replay", err);
         }
       });
+
+      // ----- Back to live button -----
+      liveBtn.addEventListener("click", () => {
+        setMode("live");
+        statusEl.textContent = "Back to live stream. Keep moving!";
+      });
+
+      draw();
     </script>
   </body>
 </html>
