@@ -132,7 +132,7 @@ button:disabled {
 
 /* Mobile D-pad */
 #touchControls {
-  margin-top: 0.75rem;
+  margin-top: 1rem;
 }
 
 .touch-dpad {
