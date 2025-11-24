@@ -66,40 +66,48 @@ const producer = kafka.producer();
 
 // live consumer: push Kafka events to all WS clients
 async function startKafka() {
-  await producer.connect();
-  await consumer.connect();
-  await consumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
+  try {
+    await producer.connect();
+    console.log("Kafka producer connected");
+    await consumer.connect();
+    console.log("Kafka consumer connected");
 
-  console.log(`Subscribed to topic: ${KAFKA_TOPIC}`);
+    await consumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
 
-  await consumer.run({
-    eachMessage: async ({ topic, partition, message }) => {
-      try {
-        const valueStr = message.value?.toString() || "{}";
-        let payload;
+    console.log(`Subscribed to topic: ${KAFKA_TOPIC}`);
 
+    await consumer.run({
+      eachMessage: async ({ topic, partition, message }) => {
         try {
-          payload = JSON.parse(valueStr);
-        } catch {
-          payload = { raw: valueStr };
+          const valueStr = message.value?.toString() || "{}";
+          let payload;
+
+          try {
+            payload = JSON.parse(valueStr);
+          } catch {
+            payload = { raw: valueStr };
+          }
+
+          const event = {
+            topic,
+            partition,
+            offset: message.offset,
+            timestamp: message.timestamp,
+            key: message.key ? message.key.toString() : null,
+            value: payload,
+            stream: "live",
+          };
+
+          broadcast(event);
+        } catch (err) {
+          console.error("Error processing message:", err);
         }
-
-        const event = {
-          topic,
-          partition,
-          offset: message.offset,
-          timestamp: message.timestamp,
-          key: message.key ? message.key.toString() : null,
-          value: payload,
-          stream: "live",
-        };
-
-        broadcast(event);
-      } catch (err) {
-        console.error("Error processing message:", err);
-      }
-    },
-  });
+      },
+    });
+  } catch (err) {
+    console.error("Kafka connection error:", err);
+    process.exit(1);
+  }
 }
 
 // --------- PRODUCE GAME EVENTS ----------
@@ -176,7 +184,6 @@ app.post("/replay", async (req, res) => {
       console.error("Replay error:", err);
     });
 
-    // stop this replay consumer after 15 seconds (demo)
     setTimeout(() => {
       replayConsumer
         .disconnect()

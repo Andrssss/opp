@@ -3,8 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <title>Kafka Multiplayer Game Demo</title>
-
-    <!-- Import external CSS -->
     <link rel="stylesheet" href="style.css" />
   </head>
 
@@ -28,9 +26,9 @@
 
           <div id="help">
             Use <strong>arrow keys</strong> or <strong>WASD</strong> on desktop,
-            or the mobile <strong>D-pad</strong>.  
-            All JOIN and MOVE events go to **Kafka**.  
-            New players reconstruct the world ONLY from the Kafka log.
+            or the mobile <strong>D-pad</strong>. Every JOIN and MOVE goes as an
+            event into <strong>Kafka</strong>. New players reconstruct the world
+            only from the Kafka log.
           </div>
 
           <!-- Mobile D-pad container -->
@@ -52,8 +50,8 @@
       </div>
     </div>
 
-    <!-- Game logic imports -->
-    <script type="module" src="controls.js"></script>
-    <script type="module" src="main.js"></script>
+    <!-- Plain scripts, no modules -->
+    <script src="controls.js"></script>
+    <script src="main.js"></script>
   </body>
 </html>

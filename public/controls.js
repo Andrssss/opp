@@ -1,7 +1,7 @@
 // public/controls.js
 
-// onMove(dx, dy) where dx/dy are -1, 0, +1
-export function initControls({ onJoin, onReplay, onLive, onMove }) {
+// Expose as global for main.js
+window.initControls = function ({ onJoin, onReplay, onLive, onMove }) {
   const joinBtn = document.getElementById("joinBtn");
   const replayBtn = document.getElementById("replayBtn");
   const liveBtn = document.getElementById("liveBtn");
@@ -20,6 +20,8 @@ export function initControls({ onJoin, onReplay, onLive, onMove }) {
 
   // ---- keyboard movement ----
   window.addEventListener("keydown", (e) => {
+    if (!onMove) return;
+
     let dx = 0;
     let dy = 0;
 
@@ -49,7 +51,7 @@ export function initControls({ onJoin, onReplay, onLive, onMove }) {
     }
 
     e.preventDefault();
-    if (onMove) onMove(dx, dy);
+    onMove(dx, dy);
   });
 
   // ---- touch D-pad for mobile ----
@@ -76,10 +78,6 @@ export function initControls({ onJoin, onReplay, onLive, onMove }) {
     const grid = document.createElement("div");
     grid.className = "touch-grid";
 
-    // 3x3 grid:
-    // [ ][↑][ ]
-    // [←][ ][→]
-    // [ ][↓][ ]
     const slots = [
       null,
       makeBtn("↑", 0, -1),
@@ -101,4 +99,4 @@ export function initControls({ onJoin, onReplay, onLive, onMove }) {
 
     touchContainer.appendChild(grid);
   }
-}
+};
