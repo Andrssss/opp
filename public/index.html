@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <title>Kafka Multiplayer Game Demo</title>
+    <!-- Important for mobile so widths/media queries behave -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="style.css" />
   </head>
 
@@ -31,7 +33,6 @@
             only from the Kafka log.
           </div>
 
-          <!-- Mobile D-pad container -->
           <div id="timelineContainer">
             <label for="timeline">
               Time slider (Kafka events):
@@ -40,9 +41,30 @@
             <input id="timeline" type="range" min="0" max="0" value="0" />
           </div>
 
-          <!-- Mobile D-pad container (now under the slider) -->
-          <div id="touchControls"></div>
+          <!-- REAL, ALWAYS-PRESENT MOBILE D-PAD -->
+          <div id="touchControls" class="touch-dpad">
+            <div class="touch-grid">
+              <div class="touch-cell"></div>
+              <div class="touch-cell">
+                <button class="touch-arrow" data-dx="0" data-dy="-1">↑</button>
+              </div>
+              <div class="touch-cell"></div>
 
+              <div class="touch-cell">
+                <button class="touch-arrow" data-dx="-1" data-dy="0">←</button>
+              </div>
+              <div class="touch-cell"></div>
+              <div class="touch-cell">
+                <button class="touch-arrow" data-dx="1" data-dy="0">→</button>
+              </div>
+
+              <div class="touch-cell"></div>
+              <div class="touch-cell">
+                <button class="touch-arrow" data-dx="0" data-dy="1">↓</button>
+              </div>
+              <div class="touch-cell"></div>
+            </div>
+          </div>
         </div>
       </div>
 

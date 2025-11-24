@@ -90,7 +90,7 @@ button:disabled {
 
 /* Timeline */
 #timelineContainer {
-  margin-top: 0.5rem;
+  margin-top: 0.75rem;
   font-size: 0.8rem;
 }
 
@@ -130,7 +130,7 @@ button:disabled {
     "Liberation Mono", "Courier New", monospace;
 }
 
-/* Mobile D-pad */
+/* Mobile / desktop D-pad – always visible for now */
 #touchControls {
   margin-top: 1rem;
 }
@@ -163,11 +163,4 @@ button:disabled {
   color: #e5e7eb;
   font-size: 1.2rem;
   font-weight: 700;
-}
-
-/* Hide D-pad on desktop */
-@media (min-width: 900px) {
-  .touch-dpad {
-    display: none;
-  }
 }

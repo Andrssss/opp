@@ -1,11 +1,10 @@
 // public/controls.js
 
-// Expose as global for main.js
+// Make initControls global so main.js can call it
 window.initControls = function ({ onJoin, onReplay, onLive, onMove }) {
   const joinBtn = document.getElementById("joinBtn");
   const replayBtn = document.getElementById("replayBtn");
   const liveBtn = document.getElementById("liveBtn");
-  const touchContainer = document.getElementById("touchControls");
 
   // ---- top buttons ----
   if (joinBtn && onJoin) {
@@ -54,49 +53,18 @@ window.initControls = function ({ onJoin, onReplay, onLive, onMove }) {
     onMove(dx, dy);
   });
 
-  // ---- touch D-pad for mobile ----
-  if (touchContainer && onMove) {
-    touchContainer.className = "touch-dpad";
+  // ---- touch / click D-pad movement ----
+  const arrowButtons = document.querySelectorAll(".touch-arrow");
+  arrowButtons.forEach((btn) => {
+    const dx = parseInt(btn.dataset.dx, 10) || 0;
+    const dy = parseInt(btn.dataset.dy, 10) || 0;
 
-    const makeBtn = (label, dx, dy) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "touch-arrow";
-      btn.textContent = label;
-
-      const fire = (evt) => {
-        evt.preventDefault();
-        onMove(dx, dy);
-      };
-
-      btn.addEventListener("click", fire);
-      btn.addEventListener("touchstart", fire, { passive: false });
-
-      return btn;
+    const fire = (evt) => {
+      evt.preventDefault();
+      if (onMove) onMove(dx, dy);
     };
 
-    const grid = document.createElement("div");
-    grid.className = "touch-grid";
-
-    const slots = [
-      null,
-      makeBtn("↑", 0, -1),
-      null,
-      makeBtn("←", -1, 0),
-      null,
-      makeBtn("→", 1, 0),
-      null,
-      makeBtn("↓", 0, 1),
-      null,
-    ];
-
-    slots.forEach((btn) => {
-      const cell = document.createElement("div");
-      cell.className = "touch-cell";
-      if (btn) cell.appendChild(btn);
-      grid.appendChild(cell);
-    });
-
-    touchContainer.appendChild(grid);
-  }
+    btn.addEventListener("click", fire);
+    btn.addEventListener("touchstart", fire, { passive: false });
+  });
 };
