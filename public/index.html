@@ -18,15 +18,15 @@
         font-size: 0.9rem;
         margin-bottom: 1rem;
       }
-      #controls {
+      #topBar {
         display: flex;
         flex-wrap: wrap;
-        gap: 0.5rem;
-        margin-bottom: 1rem;
+        gap: 0.75rem;
         align-items: center;
+        margin-bottom: 0.75rem;
       }
       button {
-        padding: 0.5rem 1rem;
+        padding: 0.4rem 0.9rem;
         border-radius: 6px;
         border: none;
         background: #f97316;
@@ -41,6 +41,28 @@
         opacity: 0.5;
         cursor: default;
       }
+      #modeLabel {
+        font-size: 0.85rem;
+        color: #9ca3af;
+      }
+
+      #layout {
+        display: flex;
+        gap: 1rem;
+      }
+      #left {
+        flex: 2;
+        min-width: 0;
+      }
+      #right {
+        flex: 1;
+        min-width: 260px;
+        max-width: 360px;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
       #gameContainer {
         background: #020617;
         border-radius: 8px;
@@ -49,7 +71,7 @@
       }
       #game {
         display: block;
-        background: radial-gradient(circle at top, #1f2937 0, #020617 60%);
+        background: radial-gradient(circle at 10% 0, #1f2937 0, #020617 65%);
         border-radius: 8px;
         border: 1px solid #111827;
       }
@@ -58,25 +80,80 @@
         margin-top: 0.5rem;
         color: #9ca3af;
       }
+
+      #timelineContainer {
+        margin-top: 0.5rem;
+        font-size: 0.8rem;
+      }
+      #timeline {
+        width: 100%;
+      }
+
+      #log {
+        flex: 1;
+        background: #020617;
+        border-radius: 8px;
+        border: 1px solid #1e293b;
+        padding: 0.5rem 0.75rem;
+        font-size: 0.8rem;
+        overflow-y: auto;
+        max-height: 520px;
+      }
+      .log-entry {
+        border-bottom: 1px solid #1f2937;
+        padding: 0.25rem 0;
+      }
+      .log-entry:last-child {
+        border-bottom: none;
+      }
+      .log-meta {
+        color: #9ca3af;
+        font-size: 0.7rem;
+      }
+      .log-body {
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+      }
     </style>
   </head>
   <body>
     <h1>Kafka Multiplayer Arena</h1>
     <div id="status">Connecting…</div>
 
-    <div id="controls">
+    <div id="topBar">
       <button id="joinBtn">Join game</button>
-      <button id="replayBtn" class="secondary" disabled>Replay from Kafka</button>
+      <button id="replayBtn" class="secondary" disabled>
+        Stop &amp; replay with slider
+      </button>
       <button id="liveBtn" class="secondary" disabled>Back to live</button>
       <span id="modeLabel"></span>
     </div>
 
-    <div id="gameContainer">
-      <canvas id="game" width="800" height="500"></canvas>
-      <div id="help">
-        Use <strong>arrow keys / WASD</strong> to move. Every movement and join
-        event is sent through <strong>Kafka</strong>. Replay will wipe the arena
-        and rebuild it only from historical Kafka events.
+    <div id="layout">
+      <div id="left">
+        <div id="gameContainer">
+          <canvas id="game" width="800" height="500"></canvas>
+          <div id="help">
+            Use <strong>arrow keys</strong> or <strong>WASD</strong> to move.
+            Every <strong>JOIN</strong> and <strong>MOVE</strong> is sent as an
+            event to Kafka. New players reconstruct the world only from the
+            Kafka log. Replay lets you scrub through that log.
+          </div>
+
+          <div id="timelineContainer">
+            <label for="timeline">
+              Time slider (Kafka events):
+              <span id="timelineLabel">0 / 0</span>
+            </label>
+            <input id="timeline" type="range" min="0" max="0" value="0" />
+          </div>
+        </div>
+      </div>
+
+      <div id="right">
+        <div><strong>Kafka events</strong> (latest first)</div>
+        <div id="log"></div>
       </div>
     </div>
 
@@ -90,42 +167,52 @@
       const canvas = document.getElementById("game");
       const ctx = canvas.getContext("2d");
 
-      // ----- basic client-side state (derived only from event stream) -----
-      const players = new Map(); // playerId -> { x, y, color }
+      const timeline = document.getElementById("timeline");
+      const timelineLabel = document.getElementById("timelineLabel");
+      const logEl = document.getElementById("log");
+
+      // ---------- Local derived state (NOT persisted) ----------
+      const players = new Map(); // playerId -> {x, y, color}
+      const allEvents = []; // ordered list of Kafka events for slider / log
+
+      const mySessionId = Math.random().toString(36).slice(2);
       let myId = null;
       let myColor = null;
       let mode = "live"; // "live" or "replay"
+      let initialSnapshotLoaded = false;
 
       function setMode(newMode) {
         mode = newMode;
-        players.clear();
-        draw();
 
         if (mode === "live") {
-          modeLabel.textContent = "Mode: LIVE (stream: live)";
-          replayBtn.disabled = false;
+          modeLabel.textContent = "Mode: LIVE (following stream)";
           liveBtn.disabled = true;
+          replayBtn.disabled = !initialSnapshotLoaded;
         } else {
-          modeLabel.textContent = "Mode: REPLAY (stream: replay)";
+          modeLabel.textContent =
+            "Mode: REPLAY (slider controls the Kafka time)";
           replayBtn.disabled = true;
           liveBtn.disabled = false;
         }
       }
-
       setMode("live");
 
-      // ----- WebSocket for streaming from Kafka -----
+      // ---------- Kafka WebSocket ----------
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsUrl = protocol + "//" + window.location.host + "/ws";
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        statusEl.textContent = "Connected to WebSocket (Kafka consumer live)";
+        statusEl.textContent =
+          "Connected to WebSocket (live Kafka stream running)";
+        // As soon as we connect, request a history replay so even new
+        // players can see current positions.
+        startReplay(); // snapshot for this session
       };
 
       ws.onclose = () => {
         statusEl.textContent =
-          "Disconnected from WebSocket (refresh to reconnect)";
+          "Disconnected from WebSocket (refresh page to reconnect)";
       };
 
       ws.onerror = (err) => {
@@ -138,30 +225,60 @@
         try {
           data = JSON.parse(msg.data);
         } catch {
-          console.warn("Non-JSON message:", msg.data);
+          console.warn("Non-JSON WS message", msg.data);
+          return;
+        }
+
+        // Control messages for replay
+        if (data.control === "REPLAY_START" || data.control === "REPLAY_END") {
+          if (data.sessionId !== mySessionId) return;
+          if (data.control === "REPLAY_START") {
+            console.log("Replay start for this session");
+          } else {
+            console.log("Replay end for this session");
+            initialSnapshotLoaded = true;
+            replayBtn.disabled = false;
+          }
           return;
         }
 
         const stream = data.stream || "live"; // "live" or "replay"
         const ev = data.value || {};
 
-        // ignore the "other" stream when in replay/live mode
-        if (mode === "live" && stream !== "live") return;
-        if (mode === "replay" && stream !== "replay") return;
+        // For replay sessions, only care about our own replay stream
+        if (stream === "replay" && data.sessionId !== mySessionId) return;
 
-        applyGameEvent(ev);
+        // Store everything we care about into allEvents (for slider + log)
+        if (ev.type) {
+          allEvents.push({
+            ev,
+            timestamp: data.timestamp,
+            stream,
+          });
+          updateTimelineMeta();
+          renderLog();
+        }
+
+        if (stream === "live" && mode === "live") {
+          applyGameEvent(ev);
+          draw();
+        }
+
+        // snapshot (replay) used to build initial state
+        if (stream === "replay" && !initialSnapshotLoaded) {
+          applyGameEvent(ev);
+          draw();
+        }
       };
 
-      // ----- Drawing -----
+      // ---------- Drawing ----------
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // draw arena border
         ctx.strokeStyle = "#1f2937";
         ctx.lineWidth = 3;
         ctx.strokeRect(10, 10, canvas.width - 20, canvas.height - 20);
 
-        // draw players
         for (const [id, p] of players.entries()) {
           const isMe = id === myId;
           const size = isMe ? 18 : 14;
@@ -188,7 +305,7 @@
         return Math.max(min, Math.min(max, v));
       }
 
-      // ----- Event application (pure event sourcing on client) -----
+      // ---------- Apply events (pure) ----------
       function applyGameEvent(ev) {
         if (!ev.type) return;
 
@@ -198,7 +315,6 @@
             y: ev.y,
             color: ev.color || "#38bdf8",
           });
-          draw();
         }
 
         if (ev.type === "PLAYER_MOVED") {
@@ -211,11 +327,10 @@
           existing.y = ev.y;
           if (ev.color) existing.color = ev.color;
           players.set(ev.playerId, existing);
-          draw();
         }
       }
 
-      // ----- Helper: send event into Kafka via backend -----
+      // ---------- Produce events into Kafka ----------
       async function sendKafkaEvent(ev) {
         try {
           const res = await fetch("/produce", {
@@ -231,11 +346,10 @@
         }
       }
 
-      // ----- Join game -----
+      // ---------- Join ----------
       joinBtn.addEventListener("click", async () => {
-        if (myId) return; // already joined
+        if (myId) return;
 
-        // unique-ish id and color only for visualisation
         myId = Math.random().toString(36).slice(2, 8);
         myColor =
           "#" +
@@ -243,7 +357,6 @@
             .toString(16)
             .padStart(6, "0");
 
-        // random spawn location inside arena
         const x = 40 + Math.random() * (canvas.width - 80);
         const y = 40 + Math.random() * (canvas.height - 80);
 
@@ -256,17 +369,16 @@
         });
 
         joinBtn.disabled = true;
-        replayBtn.disabled = false;
         statusEl.textContent =
           "Joined as " + myId + ". Use arrows / WASD to move.";
       });
 
-      // ----- Keyboard movement -----
+      // ---------- Movement ----------
       const SPEED = 10;
 
       window.addEventListener("keydown", (e) => {
         if (!myId) return;
-        if (mode !== "live") return; // during replay we don't move
+        if (mode !== "live") return; // freeze while replaying
 
         let dx = 0;
         let dy = 0;
@@ -278,8 +390,6 @@
 
         if (!dx && !dy) return;
 
-        // we don't trust local state as canonical, but we use it to create
-        // the next position which is then sent as an event to Kafka
         const current = players.get(myId) || {
           x: canvas.width / 2,
           y: canvas.height / 2,
@@ -298,31 +408,87 @@
         });
       });
 
-      // ----- Replay button -----
-      replayBtn.addEventListener("click", async () => {
-        if (!myId) {
-          alert("Join the game first so you can compare live vs replay.");
-        }
-
-        setMode("replay");
-        statusEl.textContent = "Replaying history from Kafka…";
-
+      // ---------- Replay / snapshot ----------
+      async function startReplay() {
         try {
-          const res = await fetch("/replay", { method: "POST" });
-          if (!res.ok) {
-            console.error("Replay start failed", await res.text());
-          }
+          await fetch("/replay", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionId: mySessionId }),
+          });
         } catch (err) {
           console.error("Error starting replay", err);
         }
+      }
+
+      // user clicks "Stop & replay"
+      replayBtn.addEventListener("click", () => {
+        if (!initialSnapshotLoaded) return;
+        setMode("replay");
+        // when entering replay mode, seek slider to the end (current time)
+        timeline.value = String(allEvents.length);
+        renderAtIndex(allEvents.length);
       });
 
-      // ----- Back to live button -----
+      // back to live
       liveBtn.addEventListener("click", () => {
         setMode("live");
-        statusEl.textContent = "Back to live stream. Keep moving!";
+        // Rebuild world from all events so we are on the same snapshot
+        renderAtIndex(allEvents.length);
+        statusEl.textContent = "Back to LIVE stream.";
       });
 
+      // ---------- Timeline slider ----------
+      function updateTimelineMeta() {
+        timeline.max = String(allEvents.length);
+        if (mode === "live") {
+          timeline.value = String(allEvents.length);
+        }
+        timelineLabel.textContent = `${timeline.value} / ${timeline.max}`;
+      }
+
+      function renderAtIndex(idx) {
+        players.clear();
+        const limit = Math.min(idx, allEvents.length);
+        for (let i = 0; i < limit; i++) {
+          applyGameEvent(allEvents[i].ev);
+        }
+        draw();
+        timelineLabel.textContent = `${idx} / ${allEvents.length}`;
+      }
+
+      timeline.addEventListener("input", (e) => {
+        const idx = Number(e.target.value);
+        setMode("replay");
+        renderAtIndex(idx);
+      });
+
+      // ---------- Log panel ----------
+      function renderLog() {
+        logEl.innerHTML = "";
+        const latest = [...allEvents].slice(-100).reverse(); // latest first
+        for (const item of latest) {
+          const div = document.createElement("div");
+          div.className = "log-entry";
+
+          const meta = document.createElement("div");
+          meta.className = "log-meta";
+          meta.textContent =
+            (item.stream === "live" ? "LIVE" : "REPLAY") +
+            " • " +
+            (item.ev.type || "UNKNOWN");
+
+          const body = document.createElement("div");
+          body.className = "log-body";
+          body.textContent = JSON.stringify(item.ev);
+
+          div.appendChild(meta);
+          div.appendChild(body);
+          logEl.appendChild(div);
+        }
+      }
+
+      // initial blank render
       draw();
     </script>
   </body>

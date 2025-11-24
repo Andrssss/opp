@@ -64,7 +64,7 @@ const kafka = new Kafka({
 const consumer = kafka.consumer({ groupId: "kafka-game-live" });
 const producer = kafka.producer();
 
-// Consume from Kafka and push to WS clients (LIVE stream)
+// live stream: consume from Kafka and push to WS clients
 async function startKafka() {
   await producer.connect();
   await consumer.connect();
@@ -91,10 +91,9 @@ async function startKafka() {
           timestamp: message.timestamp,
           key: message.key ? message.key.toString() : null,
           value: payload,
-          stream: "live", // mark as live stream
+          stream: "live",
         };
 
-        // Server keeps NO game state, just forwards the event
         broadcast(event);
       } catch (err) {
         console.error("Error processing message:", err);
@@ -103,8 +102,7 @@ async function startKafka() {
   });
 }
 
-// --------- HTTP ENDPOINT TO PRODUCE GAME EVENTS ----------
-// Body is the *full* event, e.g. { type: "PLAYER_MOVED", playerId, x, y }
+// --------- PRODUCE GAME EVENTS ----------
 app.post("/produce", async (req, res) => {
   try {
     const event = req.body || {};
@@ -112,7 +110,6 @@ app.post("/produce", async (req, res) => {
       return res.status(400).json({ error: "event.type is required" });
     }
 
-    // add timestamp if caller didn't
     if (!event.createdAt) {
       event.createdAt = new Date().toISOString();
     }
@@ -129,22 +126,30 @@ app.post("/produce", async (req, res) => {
   }
 });
 
-// --------- REPLAY ENDPOINT ----------
-// Starts a separate consumer from the beginning of the topic
-// and replays all events, tagged as stream:"replay".
+// --------- REPLAY (for snapshot + slider) ----------
+// Client sends a sessionId; we tag all replayed events with it.
+// Each browser only processes replay events with its own sessionId.
+// Kafka remains the *only* persistent state; this just re-reads the log.
 app.post("/replay", async (req, res) => {
+  const { sessionId } = req.body || {};
+  if (!sessionId) {
+    return res.status(400).json({ error: "sessionId is required" });
+  }
+
   try {
     const replayConsumer = kafka.consumer({
-      groupId: `kafka-game-replay-${Date.now()}`,
+      groupId: `kafka-game-replay-${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2)}`,
     });
 
     await replayConsumer.connect();
     await replayConsumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: true });
 
-    // Fire-and-forget async replay
+    // Fire-and-forget replay; response returns immediately
     (async () => {
-      console.log("Starting replay from beginning of topic");
-      broadcast({ control: "REPLAY_START" });
+      console.log("Starting replay for session", sessionId);
+      broadcast({ control: "REPLAY_START", sessionId });
 
       await replayConsumer.run({
         eachMessage: async ({ topic, partition, message }) => {
@@ -165,6 +170,7 @@ app.post("/replay", async (req, res) => {
             key: message.key ? message.key.toString() : null,
             value: payload,
             stream: "replay",
+            sessionId,
           };
 
           broadcast(event);
@@ -174,16 +180,16 @@ app.post("/replay", async (req, res) => {
       console.error("Replay error:", err);
     });
 
-    // (optional) stop replay consumer after some time so it doesn't live forever
+    // Stop replay after 15s (demo) so consumer doesn’t live forever
     setTimeout(() => {
       replayConsumer
         .disconnect()
         .then(() => {
-          console.log("Replay finished / stopped");
-          broadcast({ control: "REPLAY_END" });
+          console.log("Replay finished for session", sessionId);
+          broadcast({ control: "REPLAY_END", sessionId });
         })
         .catch((err) => console.error("Error stopping replay", err));
-    }, 15000); // 15s replay window, adjust as you like
+    }, 15000);
 
     res.json({ status: "replay-started" });
   } catch (err) {
@@ -192,7 +198,7 @@ app.post("/replay", async (req, res) => {
   }
 });
 
-// --------- START SERVER + KAFKA ----------
+// --------- START ----------
 server.listen(PORT, () => {
   console.log(`HTTP/WebSocket server listening on port ${PORT}`);
   startKafka().catch((err) => {
