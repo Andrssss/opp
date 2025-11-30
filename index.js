@@ -124,8 +124,9 @@ app.post("/produce", async (req, res) => {
 
     await producer.send({
       topic: KAFKA_TOPIC,
-      key: "game-stream", 
-      messages: [{ value: JSON.stringify(event) }],
+      messages: [{ 
+        key: "game-stream", 
+        value: JSON.stringify(event) }],
     });
 
     return res.json({ status: "ok" });

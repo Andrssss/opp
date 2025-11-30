@@ -281,22 +281,6 @@ timeline.addEventListener("input", (e) => {
   const idx = Number(e.target.value);
   setMode("replay");
   renderAtIndex(idx);
-
-  // If you later add a backend /replayFromOffset endpoint,
-  // you can also send the selected Kafka offset from here:
-  //
-  // const item = allEvents[idx - 1];
-  // if (item && item.offset !== undefined) {
-  //   fetch("/replayFromOffset", {
-  //     method: "POST",
-  //     headers: { "Content-Type": "application/json" },
-  //     body: JSON.stringify({
-  //       sessionId: mySessionId,
-  //       offset: item.offset,
-  //       partition: item.partition ?? 0,
-  //     }),
-  //   });
-  // }
 });
 
 function renderLog() {
