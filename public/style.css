@@ -164,3 +164,40 @@ button:disabled {
   font-size: 1.2rem;
   font-weight: 700;
 }
+
+
+/* ------------------------------
+   MOBILE LAYOUT FIXES
+--------------------------------*/
+@media (max-width: 700px) {
+  body {
+    padding: 0.5rem;
+  }
+
+  #layout {
+    flex-direction: column;
+  }
+
+  #right {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  #log {
+    max-height: 200px; /* Smaller log on mobile */
+  }
+
+  #gameContainer {
+    padding: 0.25rem;
+  }
+
+  #game {
+    width: 100%;
+    height: auto;
+  }
+
+  #touchControls {
+    margin-top: 0.5rem;
+    transform: scale(0.85); /* Slightly smaller D-pad */
+  }
+}
