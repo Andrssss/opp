@@ -44,7 +44,11 @@ const ws = new WebSocket(wsUrl);
 ws.onopen = () => {
   statusEl.textContent =
     "Connected to WebSocket (live Kafka stream running)";
-  startReplay(); // build initial snapshot for THIS client
+
+  // ⭐ FIX: only build snapshot once
+  if (!initialSnapshotLoaded) {
+    startReplay(); // build initial snapshot for THIS client
+  }
 };
 
 ws.onclose = () => {
@@ -78,6 +82,11 @@ ws.onmessage = (msg) => {
   const ev = data.value || {};
 
   if (stream === "replay" && data.sessionId !== mySessionId) return;
+
+  // ⭐ FIX: while snapshot is building, IGNORE live events completely
+  if (!initialSnapshotLoaded && stream === "live") {
+    return;
+  }
 
   if (ev.type) {
     allEvents.push({ ev, timestamp: data.timestamp, stream });
