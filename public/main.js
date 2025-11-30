@@ -45,7 +45,6 @@ ws.onopen = () => {
   statusEl.textContent =
     "Connected to WebSocket (live Kafka stream running)";
 
-  // ⭐ FIX: only build snapshot once
   if (!initialSnapshotLoaded) {
     startReplay(); // build initial snapshot for THIS client
   }
@@ -83,13 +82,20 @@ ws.onmessage = (msg) => {
 
   if (stream === "replay" && data.sessionId !== mySessionId) return;
 
-  // ⭐ FIX: while snapshot is building, IGNORE live events completely
+  // while snapshot is building, IGNORE live events completely
   if (!initialSnapshotLoaded && stream === "live") {
     return;
   }
 
   if (ev.type) {
-    allEvents.push({ ev, timestamp: data.timestamp, stream });
+    // store Kafka offset & partition too
+    allEvents.push({
+      ev,
+      timestamp: data.timestamp,
+      stream,
+      offset: data.offset,
+      partition: data.partition,
+    });
     updateTimelineMeta();
     renderLog();
   }
@@ -250,7 +256,15 @@ function updateTimelineMeta() {
   if (mode === "live") {
     timeline.value = String(allEvents.length);
   }
-  timelineLabel.textContent = `${timeline.value} / ${timeline.max}`;
+
+  const idx = Number(timeline.value);
+  const current = allEvents[idx - 1];
+  const offsetInfo =
+    current && current.offset !== undefined
+      ? ` (offset ${current.offset})`
+      : "";
+
+  timelineLabel.textContent = `${timeline.value} / ${timeline.max}${offsetInfo}`;
 }
 
 function renderAtIndex(idx) {
@@ -260,13 +274,36 @@ function renderAtIndex(idx) {
     applyGameEvent(allEvents[i].ev);
   }
   draw();
-  timelineLabel.textContent = `${idx} / ${allEvents.length}`;
+
+  const current = allEvents[idx - 1];
+  const offsetInfo =
+    current && current.offset !== undefined
+      ? ` (offset ${current.offset})`
+      : "";
+
+  timelineLabel.textContent = `${idx} / ${allEvents.length}${offsetInfo}`;
 }
 
 timeline.addEventListener("input", (e) => {
   const idx = Number(e.target.value);
   setMode("replay");
   renderAtIndex(idx);
+
+  // If you later add a backend /replayFromOffset endpoint,
+  // you can also send the selected Kafka offset from here:
+  //
+  // const item = allEvents[idx - 1];
+  // if (item && item.offset !== undefined) {
+  //   fetch("/replayFromOffset", {
+  //     method: "POST",
+  //     headers: { "Content-Type": "application/json" },
+  //     body: JSON.stringify({
+  //       sessionId: mySessionId,
+  //       offset: item.offset,
+  //       partition: item.partition ?? 0,
+  //     }),
+  //   });
+  // }
 });
 
 function renderLog() {
@@ -278,10 +315,15 @@ function renderLog() {
 
     const meta = document.createElement("div");
     meta.className = "log-meta";
+
+    const offsetInfo =
+      item.offset !== undefined ? ` • offset=${item.offset}` : "";
+
     meta.textContent =
       (item.stream === "live" ? "LIVE" : "REPLAY") +
       " • " +
-      (item.ev.type || "UNKNOWN");
+      (item.ev.type || "UNKNOWN") +
+      offsetInfo;
 
     const body = document.createElement("div");
     body.className = "log-body";
