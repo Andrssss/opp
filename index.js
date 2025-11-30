@@ -61,7 +61,7 @@ const kafka = new Kafka({
   },
 });
 
-const consumer = kafka.consumer({ groupId: "kafka-game-live" });
+const consumer = kafka.consumer({   groupId: "kafka-game-live-" + Date.now().toString(16), });
 const producer = kafka.producer();
 
 // live consumer: push Kafka events to all WS clients
@@ -124,6 +124,7 @@ app.post("/produce", async (req, res) => {
 
     await producer.send({
       topic: KAFKA_TOPIC,
+      key: "game-stream", 
       messages: [{ value: JSON.stringify(event) }],
     });
 

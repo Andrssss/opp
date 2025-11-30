@@ -274,15 +274,8 @@ function renderAtIndex(idx) {
     applyGameEvent(allEvents[i].ev);
   }
   draw();
-
-  const current = allEvents[idx - 1];
-  const offsetInfo =
-    current && current.offset !== undefined
-      ? ` (offset ${current.offset})`
-      : "";
-
-  timelineLabel.textContent = `${idx} / ${allEvents.length}${offsetInfo}`;
 }
+
 
 timeline.addEventListener("input", (e) => {
   const idx = Number(e.target.value);
